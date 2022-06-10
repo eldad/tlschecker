@@ -1,4 +1,5 @@
 use clap::{App, Arg};
+use colored::Colorize;
 use std::process::exit;
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
@@ -10,6 +11,13 @@ fn main() {
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
         .long_about(env!("CARGO_PKG_DESCRIPTION"))
+        .arg(
+            Arg::with_name("minimum_lifetime")
+                .long("min-lifetime")
+                .short("l")
+                .help("Checks minimum lifetime of certificates. Suppresses other output.")
+                .takes_value(true),
+        )
         .arg(
             Arg::with_name("host")
                 .short("h")
@@ -24,6 +32,11 @@ fn main() {
                 .help("Prints json output"),
         )
         .get_matches();
+
+    let minimum_lifetime: Option<usize> = matches
+        .value_of("minimum_lifetime")
+        .map(|o| o.parse::<usize>().ok())
+        .flatten();
 
     let (sender, receiver): (Sender<Certificate>, Receiver<Certificate>) = mpsc::channel();
     let hosts: Vec<String> = matches
@@ -51,36 +64,58 @@ fn main() {
         certificates.push(cert);
     }
 
-    if !matches.is_present("json") {
-        for cert in certificates {
-            println!("--------------------------------------");
-            println!("Hostname: {}", cert.hostname);
-            println!("Issued domain: {}", cert.subject.common_name);
-            println!("Subject Name :");
-            println!("\tCountry or Region: {}", cert.subject.country_or_region);
-            println!("\tState or Province: {}", cert.subject.state_or_province);
-            println!("\tLocality: {}", cert.subject.locality);
-            println!("\tOrganizational Unit: {}", cert.subject.organization_unit);
-            println!("\tOrganization: {}", cert.subject.organization);
-            println!("\tCommon Name: {}", cert.subject.common_name);
-            println!("Issuer Name:");
-            println!("\tCountry or Region: {}", cert.issued.country_or_region);
-            println!("\tOrganization: {}", cert.issued.organization);
-            println!("\tCommon Name: {}", cert.issued.common_name);
-            println!("Valid from: {}", cert.valid_from);
-            println!("Valid to: {}", cert.valid_to);
-            println!("Days left: {}", cert.validity_days);
-            println!("Expired: {}", cert.is_expired);
-            println!("Certificate version: {}", cert.cert_ver);
-            println!("Certificate algorithm: {}", cert.cert_alg);
-            println!("Certificate S/N: {}", cert.cert_sn);
-            println!("Subject Alternative Names:");
-            for san in cert.sans {
-                println!("\tDNS Name: {}", san);
-            }
-        }
+    if let Some(minimum_lifetime) = minimum_lifetime {
+        let (above, below): (Vec<Certificate>, Vec<Certificate>) = certificates
+            .into_iter()
+            .partition(|cert| cert.validity_days > minimum_lifetime as i32);
+
+        above.iter().for_each(|cert| {
+            println!(
+                "[OK] Hostname {}, {} days left",
+                cert.hostname.green(),
+                cert.validity_days
+            )
+        });
+
+        below.iter().for_each(|cert| {
+            println!(
+                "[WARNING] Hostname {}, ONLY {} days left!",
+                cert.hostname.red(),
+                cert.validity_days
+            )
+        });
     } else {
-        println!("{}", serde_json::to_string_pretty(&certificates).unwrap());
+        if !matches.is_present("json") {
+            for cert in certificates {
+                println!("--------------------------------------");
+                println!("Hostname: {}", cert.hostname);
+                println!("Issued domain: {}", cert.subject.common_name);
+                println!("Subject Name :");
+                println!("\tCountry or Region: {}", cert.subject.country_or_region);
+                println!("\tState or Province: {}", cert.subject.state_or_province);
+                println!("\tLocality: {}", cert.subject.locality);
+                println!("\tOrganizational Unit: {}", cert.subject.organization_unit);
+                println!("\tOrganization: {}", cert.subject.organization);
+                println!("\tCommon Name: {}", cert.subject.common_name);
+                println!("Issuer Name:");
+                println!("\tCountry or Region: {}", cert.issued.country_or_region);
+                println!("\tOrganization: {}", cert.issued.organization);
+                println!("\tCommon Name: {}", cert.issued.common_name);
+                println!("Valid from: {}", cert.valid_from);
+                println!("Valid to: {}", cert.valid_to);
+                println!("Days left: {}", cert.validity_days);
+                println!("Expired: {}", cert.is_expired);
+                println!("Certificate version: {}", cert.cert_ver);
+                println!("Certificate algorithm: {}", cert.cert_alg);
+                println!("Certificate S/N: {}", cert.cert_sn);
+                println!("Subject Alternative Names:");
+                for san in cert.sans {
+                    println!("\tDNS Name: {}", san);
+                }
+            }
+        } else {
+            println!("{}", serde_json::to_string_pretty(&certificates).unwrap());
+        }
     }
 
     exit(0);
